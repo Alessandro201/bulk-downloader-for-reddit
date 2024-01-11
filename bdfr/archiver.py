@@ -10,6 +10,7 @@ from time import sleep
 from typing import Union
 
 import dict2xml
+import praw.exceptions
 import praw.models
 import prawcore
 import yaml
@@ -49,6 +50,14 @@ class Archiver(RedditConnector):
                         self.write_entry(submission)
                     except prawcore.PrawcoreException as e:
                         logger.error(f"Submission {submission.id} failed to be archived due to a PRAW exception: {e}")
+                    except praw.exceptions.ClientException as e:
+                        if isinstance(submission, praw.models.Comment):
+                            logger.error(
+                                f"Comment {submission.id} of Submission {submission.submission.id} "
+                                f"failed to be cloned due to a PRAW exception: {e}"
+                            )
+                        else:
+                            logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
             except prawcore.PrawcoreException as e:
                 logger.error(f"The submission after {submission.id} failed to download due to a PRAW exception: {e}")
                 logger.debug("Waiting 60 seconds to continue")

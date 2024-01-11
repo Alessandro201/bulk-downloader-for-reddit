@@ -5,6 +5,8 @@ import logging
 from collections.abc import Iterable
 from time import sleep
 
+import praw.exceptions
+import praw.models
 import prawcore
 
 from bdfr.archiver import Archiver
@@ -27,6 +29,14 @@ class RedditCloner(RedditDownloader, Archiver):
                         self.write_entry(submission)
                     except prawcore.PrawcoreException as e:
                         logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
+                    except praw.exceptions.ClientException as e:
+                        if isinstance(submission, praw.models.Comment):
+                            logger.error(
+                                f"Comment {submission.id} of Submission {submission.submission.id} "
+                                f"failed to be cloned due to a PRAW exception: {e}"
+                            )
+                        else:
+                            logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
             except prawcore.PrawcoreException as e:
                 logger.error(f"The submission after {submission.id} failed to download due to a PRAW exception: {e}")
                 logger.debug("Waiting 60 seconds to continue")
