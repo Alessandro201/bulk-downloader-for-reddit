@@ -47,7 +47,7 @@ class Configuration(Namespace):
         self.sort: str = "hot"
         self.submitted: bool = False
         self.subscribed: bool = False
-        self.quarantine: bool = False
+        self.quarantined: bool = False
         self.subreddit: list[str] = []
         self.time: str = "all"
         self.time_format = None

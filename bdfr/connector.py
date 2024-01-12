@@ -272,8 +272,8 @@ class RedditConnector(metaclass=ABCMeta):
                     continue
                 try:
                     reddit = self.reddit_instance.subreddit(reddit)
-                    if self.args.quarantine:
-                        reddit.quarant.opt_in()
+                    if self.args.quarantined:
+                        reddit.quaran.opt_in()
                     try:
                         self.check_subreddit_status(reddit)
                     except errors.BulkDownloaderException as e:
