@@ -103,15 +103,18 @@ class Archiver(RedditConnector):
             logger.debug(f"Converting comment {praw_item.id} to submission {praw_item.submission.id}")
             praw_item = praw_item.submission
         archive_entry = self._pull_lever_entry_factory(praw_item)
-        if self.args.format == "json":
-            self._write_entry_json(archive_entry)
-        elif self.args.format == "xml":
-            self._write_entry_xml(archive_entry)
-        elif self.args.format == "yaml":
-            self._write_entry_yaml(archive_entry)
-        else:
-            raise ArchiverError(f"Unknown format {self.args.format} given")
-        logger.info(f"Record for entry item {praw_item.id} written to disk")
+        try:
+            if self.args.format == "json":
+                self._write_entry_json(archive_entry)
+            elif self.args.format == "xml":
+                self._write_entry_xml(archive_entry)
+            elif self.args.format == "yaml":
+                self._write_entry_yaml(archive_entry)
+            else:
+                raise ArchiverError(f"Unknown format {self.args.format} given")
+            logger.info(f"Record for entry item {praw_item.id} written to disk")
+        except praw.exceptions.ClientException:
+            logger.info(f"Unable to retrieve record for entry item {praw_item.id}")
 
     def _write_entry_json(self, entry: BaseArchiveEntry):
         resource = Resource(entry.source, "", lambda: None, ".json")

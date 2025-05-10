@@ -114,6 +114,8 @@ class RedditDownloader(RedditConnector):
         except errors.SiteDownloaderError as e:
             logger.error(f"Site {downloader_class.__name__} failed to download submission {submission.id}: {e}")
             return
+        except requests.exceptions.ChunkedEncodingError:
+            raise errors.SiteDownloaderError("Failed to retrieve downloadable urls due to a network error")
         for destination, res in self.file_name_formatter.format_resource_paths(content, self.download_directory):
             if destination.exists():
                 logger.debug(f"File {destination} from submission {submission.id} already exists, continuing")
