@@ -13,6 +13,7 @@ import dict2xml
 import praw.exceptions
 import praw.models
 import prawcore
+import prawcore.exceptions
 import yaml
 
 from bdfr.archive_entry.base_archive_entry import BaseArchiveEntry
@@ -33,37 +34,53 @@ class Archiver(RedditConnector):
     def download(self):
         for generator in self.reddit_lists:
             submission = None
+            retry = 0
+            max_retries = 2
             try:
                 for submission in generator:
-                    try:
-                        if (submission.author and submission.author.name in self.args.ignore_user) or (
-                                submission.author is None and "DELETED" in self.args.ignore_user
-                        ):
-                            logger.debug(
-                                f"Submission {submission.id} in {submission.subreddit.display_name} skipped due to"
-                                f" {submission.author.name if submission.author else 'DELETED'} being an ignored user"
-                            )
-                            continue
-                        if submission.id in self.excluded_submission_ids:
-                            logger.debug(f"Object {submission.id} in exclusion list, skipping")
-                            continue
-                        logger.debug(f"Attempting to archive submission {submission.id}")
-                        self.write_entry(submission)
-                    except prawcore.PrawcoreException as e:
-                        logger.error(f"Submission {submission.id} failed to be archived due to a PRAW exception: {e}")
-                    except praw.exceptions.ClientException as e:
-                        if isinstance(submission, praw.models.Comment):
-                            logger.error(
-                                f"Comment {submission.id} of Submission {submission.submission.id} "
-                                f"failed to be cloned due to a PRAW exception: {e}"
-                            )
-                        else:
-                            logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
+                    retry = 0
+                    while retry < max_retries:
+                        try:
+                            if (submission.author and submission.author.name in self.args.ignore_user) or 
+                                (submission.author is None and "DELETED" in self.args.ignore_user):
+                                logger.debug(
+                                    f"Submission {submission.id} in {submission.subreddit.display_name} skipped due to"
+                                    f" {submission.author.name if submission.author else 'DELETED'} being an ignored user"
+                                )
+                                break
+                            if submission.id in self.excluded_submission_ids:
+                                logger.debug(f"Object {submission.id} in exclusion list, skipping")
+                                break
+                            logger.debug(f"Attempting to archive submission {submission.id}")
+                            self.write_entry(submission)
+
+                        except prawcore.PrawcoreException as e:
+                            logger.error(f"Submission {submission.id} failed to be archived due to a PRAW exception: {e}")
+
+                        except prawcore.exceptions.TooManyRequests:
+                            if retry < max_retries:
+                                retry += 1
+                                logger.debug(f"Received TooManyRequest 429 HTTP response. Waiting {30 *(retry ** 3)}s before retrying")
+                                sleep(30 * (retry ** 3))
+                                continue
+                            else:
+                                if isinstance(submission, praw.models.Comment):
+                                    logger.error(f"Comment {submission.id} of Submission {submission.submission.id} "
+                                        f"failed to be cloned due to to TooManyRequest 429 HTTP response")
+                                else:
+                                    logger.error(f"Submission {submission.id} failed to be cloned due to TooManyRequest 429 HTTP response")
+
+                        except praw.exceptions.ClientException as e:
+                            if isinstance(submission, praw.models.Comment):
+                                logger.error(f"Comment {submission.id} of Submission {submission.submission.id} "
+                                    f"failed to be cloned due to a PRAW exception: {e}")
+                            else:
+                                logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
+                        break
+
             except prawcore.PrawcoreException as e:
                 if submission:
-                    logger.error(
-                        f"The submission after {submission.id} failed to download due to a PRAW exception: {e}"
-                    )
+                    logger.error(f"The submission after {submission.id} failed to download due to a PRAW exception: {e}")
                 else:
                     logger.error(f"The first submission failed to download due to a PRAW exception: {e}")
                 logger.debug("Waiting 60 seconds to continue")
