@@ -13,6 +13,7 @@ import dict2xml
 import praw.exceptions
 import praw.models
 import prawcore
+import prawcore.exceptions
 import yaml
 
 from bdfr.archive_entry.base_archive_entry import BaseArchiveEntry
@@ -33,37 +34,53 @@ class Archiver(RedditConnector):
     def download(self):
         for generator in self.reddit_lists:
             submission = None
+            retry = 0
+            max_retries = 2
             try:
                 for submission in generator:
-                    try:
-                        if (submission.author and submission.author.name in self.args.ignore_user) or (
-                                submission.author is None and "DELETED" in self.args.ignore_user
-                        ):
-                            logger.debug(
-                                f"Submission {submission.id} in {submission.subreddit.display_name} skipped due to"
-                                f" {submission.author.name if submission.author else 'DELETED'} being an ignored user"
-                            )
-                            continue
-                        if submission.id in self.excluded_submission_ids:
-                            logger.debug(f"Object {submission.id} in exclusion list, skipping")
-                            continue
-                        logger.debug(f"Attempting to archive submission {submission.id}")
-                        self.write_entry(submission)
-                    except prawcore.PrawcoreException as e:
-                        logger.error(f"Submission {submission.id} failed to be archived due to a PRAW exception: {e}")
-                    except praw.exceptions.ClientException as e:
-                        if isinstance(submission, praw.models.Comment):
-                            logger.error(
-                                f"Comment {submission.id} of Submission {submission.submission.id} "
-                                f"failed to be cloned due to a PRAW exception: {e}"
-                            )
-                        else:
-                            logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
+                    retry = 0
+                    while retry < max_retries:
+                        try:
+                            if (submission.author and submission.author.name in self.args.ignore_user) or 
+                                (submission.author is None and "DELETED" in self.args.ignore_user):
+                                logger.debug(
+                                    f"Submission {submission.id} in {submission.subreddit.display_name} skipped due to"
+                                    f" {submission.author.name if submission.author else 'DELETED'} being an ignored user"
+                                )
+                                break
+                            if submission.id in self.excluded_submission_ids:
+                                logger.debug(f"Object {submission.id} in exclusion list, skipping")
+                                break
+                            logger.debug(f"Attempting to archive submission {submission.id}")
+                            self.write_entry(submission)
+
+                        except prawcore.PrawcoreException as e:
+                            logger.error(f"Submission {submission.id} failed to be archived due to a PRAW exception: {e}")
+
+                        except prawcore.exceptions.TooManyRequests:
+                            if retry < max_retries:
+                                retry += 1
+                                logger.debug(f"Received TooManyRequest 429 HTTP response. Waiting {30 *(retry ** 3)}s before retrying")
+                                sleep(30 * (retry ** 3))
+                                continue
+                            else:
+                                if isinstance(submission, praw.models.Comment):
+                                    logger.error(f"Comment {submission.id} of Submission {submission.submission.id} "
+                                        f"failed to be cloned due to to TooManyRequest 429 HTTP response")
+                                else:
+                                    logger.error(f"Submission {submission.id} failed to be cloned due to TooManyRequest 429 HTTP response")
+
+                        except praw.exceptions.ClientException as e:
+                            if isinstance(submission, praw.models.Comment):
+                                logger.error(f"Comment {submission.id} of Submission {submission.submission.id} "
+                                    f"failed to be cloned due to a PRAW exception: {e}")
+                            else:
+                                logger.error(f"Submission {submission.id} failed to be cloned due to a PRAW exception: {e}")
+                        break
+
             except prawcore.PrawcoreException as e:
                 if submission:
-                    logger.error(
-                        f"The submission after {submission.id} failed to download due to a PRAW exception: {e}"
-                    )
+                    logger.error(f"The submission after {submission.id} failed to download due to a PRAW exception: {e}")
                 else:
                     logger.error(f"The first submission failed to download due to a PRAW exception: {e}")
                 logger.debug("Waiting 60 seconds to continue")
@@ -103,15 +120,18 @@ class Archiver(RedditConnector):
             logger.debug(f"Converting comment {praw_item.id} to submission {praw_item.submission.id}")
             praw_item = praw_item.submission
         archive_entry = self._pull_lever_entry_factory(praw_item)
-        if self.args.format == "json":
-            self._write_entry_json(archive_entry)
-        elif self.args.format == "xml":
-            self._write_entry_xml(archive_entry)
-        elif self.args.format == "yaml":
-            self._write_entry_yaml(archive_entry)
-        else:
-            raise ArchiverError(f"Unknown format {self.args.format} given")
-        logger.info(f"Record for entry item {praw_item.id} written to disk")
+        try:
+            if self.args.format == "json":
+                self._write_entry_json(archive_entry)
+            elif self.args.format == "xml":
+                self._write_entry_xml(archive_entry)
+            elif self.args.format == "yaml":
+                self._write_entry_yaml(archive_entry)
+            else:
+                raise ArchiverError(f"Unknown format {self.args.format} given")
+            logger.info(f"Record for entry item {praw_item.id} written to disk")
+        except praw.exceptions.ClientException:
+            logger.info(f"Unable to retrieve record for entry item {praw_item.id}")
 
     def _write_entry_json(self, entry: BaseArchiveEntry):
         resource = Resource(entry.source, "", lambda: None, ".json")

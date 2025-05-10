@@ -79,6 +79,8 @@ class Redgifs(BaseDownloader):
                 raise KeyError
         except (KeyError, AttributeError):
             raise SiteDownloaderError("Failed to find JSON data in page")
+        except requests.exceptions.ChunkedEncodingError:
+            raise SiteDownloaderError("Failed to retrieve downloadable urls due to a network error")
 
         # Update subdomain if old one is returned
         out = {re.sub("thumbs2", "thumbs3", link) for link in out}
